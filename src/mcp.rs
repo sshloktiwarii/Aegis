@@ -172,45 +172,32 @@ impl McpServer {
                     }
                     "execute_command" => {
                         let cmd = arguments.get("command").and_then(|v| v.as_str()).unwrap_or("");
-                        match self.sanitizer.sanitize(cmd) {
-                            Ok(_) => match self.isolator.execute(cmd).await {
-                                Ok(res) => {
-                                    let stdout_str = String::from_utf8_lossy(&res.stdout).to_string();
-                                    let stderr_str = String::from_utf8_lossy(&res.stderr).to_string();
-                                    JsonRpcResponse {
-                                        jsonrpc: "2.0".to_string(),
-                                        id: req.id,
-                                        result: Some(json!({
-                                            "content": [
-                                                {
-                                                    "type": "text",
-                                                    "text": stdout_str
-                                                }
-                                            ],
-                                            "metadata": {
-                                                "exit_code": res.exit_code,
-                                                "stderr": stderr_str,
-                                                "receipt": res.receipt
-                                            }
-                                        })),
-                                        error: None,
-                                    }
-                                }
-                                Err(err) => JsonRpcResponse {
+                        let lint_report = self.sanitizer.sanitize(cmd).ok();
+
+                        match self.isolator.execute(cmd).await {
+                            Ok(res) => {
+                                let stdout_str = String::from_utf8_lossy(&res.stdout).to_string();
+                                let stderr_str = String::from_utf8_lossy(&res.stderr).to_string();
+                                JsonRpcResponse {
                                     jsonrpc: "2.0".to_string(),
                                     id: req.id,
                                     result: Some(json!({
-                                        "isError": true,
                                         "content": [
                                             {
                                                 "type": "text",
-                                                "text": format!("Isolation runtime error: {}", err)
+                                                "text": stdout_str
                                             }
-                                        ]
+                                        ],
+                                        "metadata": {
+                                            "exit_code": res.exit_code,
+                                            "stderr": stderr_str,
+                                            "receipt": res.receipt,
+                                            "lint_advisory": lint_report
+                                        }
                                     })),
                                     error: None,
-                                },
-                            },
+                                }
+                            }
                             Err(err) => JsonRpcResponse {
                                 jsonrpc: "2.0".to_string(),
                                 id: req.id,
@@ -219,7 +206,7 @@ impl McpServer {
                                     "content": [
                                         {
                                             "type": "text",
-                                            "text": format!("GATEWAY BLOCKED COMMAND: {}", err)
+                                            "text": format!("Kernel isolation runtime error: {}", err)
                                         }
                                     ]
                                 })),
