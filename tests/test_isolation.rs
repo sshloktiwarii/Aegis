@@ -61,3 +61,26 @@ async fn test_kernel_seatbelt_blocks_directory_escape() {
         stderr_str
     );
 }
+
+#[tokio::test]
+async fn test_linux_namespaces_driver() {
+    if !Isolator::is_unshare_available() {
+        return;
+    }
+
+    let tmp = tempdir().unwrap();
+    let mut config = SandboxConfig::default();
+    config.workspace_dir = tmp.path().to_path_buf();
+
+    let isolator = Isolator::new(config, IsolationBackend::LinuxNamespaces);
+    let result = isolator.execute("echo 'unshare-isolated'").await;
+
+    assert!(result.is_ok());
+    let res = result.unwrap();
+    assert_eq!(res.exit_code, 0);
+    let stdout_str = String::from_utf8_lossy(&res.stdout);
+    assert!(stdout_str.contains("unshare-isolated"));
+    assert_eq!(res.receipt.isolation_backend, "linux_namespaces");
+    assert!(res.receipt.verify(&res.stdout, &res.stderr));
+}
+

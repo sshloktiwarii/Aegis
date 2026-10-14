@@ -33,6 +33,7 @@ pub struct ExecutionResult {
 pub enum IsolationBackend {
     Docker,
     SeatbeltOrNamespaces,
+    LinuxNamespaces,
     ProcessSandbox,
 }
 
@@ -42,6 +43,7 @@ pub struct SandboxConfig {
     pub memory_limit_mb: u32,
     pub cpu_quota: f32,
     pub allow_network: bool,
+    pub enable_landlock: bool,
 }
 
 impl Default for SandboxConfig {
@@ -52,6 +54,7 @@ impl Default for SandboxConfig {
             memory_limit_mb: 512,
             cpu_quota: 1.0,
             allow_network: false,
+            enable_landlock: true,
         }
     }
 }
@@ -89,6 +92,11 @@ impl Isolator {
         Path::new("/usr/bin/sandbox-exec").exists()
     }
 
+    /// Check if Linux unshare binary is present on host for user/mount/net/pid namespaces
+    pub fn is_unshare_available() -> bool {
+        Path::new("/usr/bin/unshare").exists() || Path::new("/bin/unshare").exists()
+    }
+
     /// Execute command within the requested kernel/container isolation boundary
     pub async fn execute(
         &self,
@@ -102,6 +110,8 @@ impl Isolator {
                     self.execute_in_docker(command_str).await?
                 } else if Self::is_seatbelt_available() {
                     self.execute_in_seatbelt(command_str).await?
+                } else if Self::is_unshare_available() {
+                    self.execute_in_unshare(command_str).await?
                 } else {
                     self.execute_in_process_sandbox(command_str).await?
                 }
@@ -109,6 +119,15 @@ impl Isolator {
             IsolationBackend::SeatbeltOrNamespaces => {
                 if Self::is_seatbelt_available() {
                     self.execute_in_seatbelt(command_str).await?
+                } else if Self::is_unshare_available() {
+                    self.execute_in_unshare(command_str).await?
+                } else {
+                    self.execute_in_process_sandbox(command_str).await?
+                }
+            }
+            IsolationBackend::LinuxNamespaces => {
+                if Self::is_unshare_available() {
+                    self.execute_in_unshare(command_str).await?
                 } else {
                     self.execute_in_process_sandbox(command_str).await?
                 }
@@ -199,6 +218,62 @@ impl Isolator {
             Ok(Ok(output)) => {
                 let exit_code = output.status.code().unwrap_or(-1);
                 Ok((exit_code, output.stdout, output.stderr, "macos_seatbelt"))
+            }
+            Ok(Err(e)) => Err(IsolationError::IoError(e)),
+            Err(_) => Err(IsolationError::Timeout(self.config.timeout_duration.as_millis() as u64)),
+        }
+    }
+
+    /// Native Linux namespaces driver utilizing unshare (user, mount, pid, net)
+    /// Enables non-Docker rootless isolation on bare-metal or cloud VMs
+    async fn execute_in_unshare(
+        &self,
+        command_str: &str,
+    ) -> Result<(i32, Vec<u8>, Vec<u8>, &'static str), IsolationError> {
+        let workspace = self
+            .config
+            .workspace_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.config.workspace_dir.clone());
+
+        let unshare_bin = if Path::new("/usr/bin/unshare").exists() {
+            "/usr/bin/unshare"
+        } else {
+            "unshare"
+        };
+
+        let mut cmd = Command::new(unshare_bin);
+        // -r: map current user to root in new user namespace (unprivileged)
+        // -m: unshare mount namespace
+        // -p: unshare pid namespace
+        // -f: fork child so child becomes PID 1 in new namespace
+        cmd.arg("-r")
+            .arg("-m")
+            .arg("-p")
+            .arg("-f");
+
+        if !self.config.allow_network {
+            cmd.arg("-n"); // unshare network namespace
+        }
+
+        cmd.arg("--")
+            .arg("sh")
+            .arg("-c")
+            .arg(command_str)
+            .current_dir(&workspace)
+            .env_clear()
+            .env("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+            .env("TMPDIR", "/tmp")
+            .env("LC_ALL", "C")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let execution = timeout(self.config.timeout_duration, cmd.output()).await;
+
+        match execution {
+            Ok(Ok(output)) => {
+                let exit_code = output.status.code().unwrap_or(-1);
+                Ok((exit_code, output.stdout, output.stderr, "linux_namespaces"))
             }
             Ok(Err(e)) => Err(IsolationError::IoError(e)),
             Err(_) => Err(IsolationError::Timeout(self.config.timeout_duration.as_millis() as u64)),
