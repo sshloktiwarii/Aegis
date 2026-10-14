@@ -1,0 +1,33 @@
+[package]
+name = "aegis-sandbox"
+version = "0.1.0"
+edition = "2021"
+authors = ["Shlok Tiwari <shloktiwari@users.noreply.github.com>"]
+description = "Deterministic middleware gateway & sandbox for safe autonomous agent tool execution"
+license = "MIT"
+repository = "https://github.com/sshloktiwarii/aegis-sandbox"
+
+[dependencies]
+tokio = { version = "1.38", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.5", features = ["derive"] }
+blake3 = "1.5"
+regex = "1.10"
+thiserror = "1.0"
+anyhow = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.8", features = ["v4", "serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = "3.10"
+
+[[bin]]
+name = "aegis"
+path = "src/main.rs"
+
+[lib]
+name = "aegis_sandbox"
+path = "src/lib.rs"
