@@ -1,8 +1,8 @@
-# Aegis Sandbox 🛡️
+# Aegis Sandbox
 
 > **Deterministic Middleware Gateway & Sandbox for Safe Autonomous Agent Tool Execution**
 >
-> 📖 **New to this project?** Read the [Plain-English Guide for Dummies](file:///Users/shloktiwari/Documents/untitled%20folder/aegis-sandbox/README_FOR_DUMMIES.md) for a zero-jargon overview, everyday analogies, and a 60-second test walk-through.
+> **New to this project?** Read the [Plain-English Guide for Dummies](file:///Users/shloktiwari/Documents/untitled%20folder/aegis-sandbox/README_FOR_DUMMIES.md) for a zero-jargon overview, everyday analogies, and a 60-second test walk-through.
 
 Aegis solves the **Blast Radius Problem** in autonomous AI agents. The moment an LLM is connected to system execution tools, it operates in an untrusted environment where hallucinations, indirect prompt injection, and catastrophic commands (such as `rm -rf /` or credential exfiltration) can cause irreversible damage.
 
@@ -10,7 +10,7 @@ Aegis sits between the LLM and host infrastructure, acting as a deterministic se
 
 ---
 
-## ⚡ Core Architecture
+## Core Architecture
 
 - **AST & Command Sanitization**: Inspects incoming shell expressions, rejecting destructive primitives, outbound exfiltration pipelines (`curl`, `/dev/tcp`), and credential file traversals (`.env`, `~/.ssh`).
 - **Dual Isolation Engine**:
@@ -21,7 +21,7 @@ Aegis sits between the LLM and host infrastructure, acting as a deterministic se
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Build & Test
 ```bash
@@ -47,7 +47,7 @@ cargo run -- mcp --workspace /path/to/sandboxed/project
 
 ---
 
-## 🧪 Security Rules Matrix
+## Security Rules Matrix
 
 | Attack Vector | Example Payload | Aegis Defense |
 | :--- | :--- | :--- |
@@ -59,5 +59,5 @@ cargo run -- mcp --workspace /path/to/sandboxed/project
 
 ---
 
-## 📜 License
+## License
 MIT License (c) 2026 Shlok Tiwari
