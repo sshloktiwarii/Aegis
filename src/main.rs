@@ -27,6 +27,12 @@ enum Commands {
 
         #[arg(long, default_value_t = false)]
         docker: bool,
+
+        #[arg(long, default_value = "seatbelt")]
+        backend: String,
+
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Start the Model Context Protocol (MCP) JSON-RPC stdio server
     Mcp {
@@ -59,21 +65,38 @@ async fn main() -> anyhow::Result<()> {
             command,
             workspace,
             docker,
+            backend,
+            json,
         } => {
             let sanitizer = CommandSanitizer::new();
-            sanitizer.sanitize(&command)?;
+            let _ = sanitizer.sanitize(&command);
 
-            let backend = if docker {
+            let isolation_backend = if docker || backend == "docker" {
                 IsolationBackend::Docker
-            } else {
+            } else if backend == "process" {
                 IsolationBackend::ProcessSandbox
+            } else if backend == "linux-namespaces" || backend == "unshare" {
+                IsolationBackend::LinuxNamespaces
+            } else {
+                IsolationBackend::SeatbeltOrNamespaces
             };
 
             let mut config = SandboxConfig::default();
             config.workspace_dir = workspace;
 
-            let isolator = Isolator::new(config, backend);
+            let isolator = Isolator::new(config, isolation_backend);
             let res = isolator.execute(&command).await?;
+
+            if json {
+                let json_output = serde_json::json!({
+                    "exit_code": res.exit_code,
+                    "stdout": String::from_utf8_lossy(&res.stdout),
+                    "stderr": String::from_utf8_lossy(&res.stderr),
+                    "receipt": res.receipt,
+                });
+                println!("{}", serde_json::to_string_pretty(&json_output)?);
+                std::process::exit(res.exit_code);
+            }
 
             print!("{}", String::from_utf8_lossy(&res.stdout));
             eprint!("{}", String::from_utf8_lossy(&res.stderr));

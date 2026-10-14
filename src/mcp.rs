@@ -35,7 +35,7 @@ impl McpServer {
 
         Self {
             sanitizer: CommandSanitizer::new(),
-            isolator: Isolator::new(config, IsolationBackend::ProcessSandbox),
+            isolator: Isolator::new(config, IsolationBackend::SeatbeltOrNamespaces),
         }
     }
 
