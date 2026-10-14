@@ -1,6 +1,8 @@
 # Aegis Sandbox 🛡️
 
 > **Deterministic Middleware Gateway & Sandbox for Safe Autonomous Agent Tool Execution**
+>
+> 📖 **New to this project?** Read the [Plain-English Guide for Dummies](file:///Users/shloktiwari/Documents/untitled%20folder/aegis-sandbox/README_FOR_DUMMIES.md) for a zero-jargon overview, everyday analogies, and a 60-second test walk-through.
 
 Aegis solves the **Blast Radius Problem** in autonomous AI agents. The moment an LLM is connected to system execution tools, it operates in an untrusted environment where hallucinations, indirect prompt injection, and catastrophic commands (such as `rm -rf /` or credential exfiltration) can cause irreversible damage.
 
