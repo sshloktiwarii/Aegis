@@ -75,6 +75,8 @@ async fn main() -> anyhow::Result<()> {
                 IsolationBackend::Docker
             } else if backend == "process" {
                 IsolationBackend::ProcessSandbox
+            } else if backend == "bwrap" || backend == "bubblewrap" {
+                IsolationBackend::Bubblewrap
             } else if backend == "linux-namespaces" || backend == "unshare" {
                 IsolationBackend::LinuxNamespaces
             } else {

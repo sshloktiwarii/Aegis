@@ -34,6 +34,7 @@ pub enum IsolationBackend {
     Docker,
     SeatbeltOrNamespaces,
     LinuxNamespaces,
+    Bubblewrap,
     ProcessSandbox,
 }
 
@@ -97,6 +98,21 @@ impl Isolator {
         Path::new("/usr/bin/unshare").exists() || Path::new("/bin/unshare").exists()
     }
 
+    /// Check if Bubblewrap bwrap binary is present on host
+    pub fn is_bwrap_available() -> bool {
+        if Path::new("/usr/bin/bwrap").exists() || Path::new("/bin/bwrap").exists() {
+            return true;
+        }
+        if let Ok(path_var) = std::env::var("PATH") {
+            for dir in path_var.split(':') {
+                if Path::new(dir).join("bwrap").exists() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     /// Execute command within the requested kernel/container isolation boundary
     pub async fn execute(
         &self,
@@ -108,6 +124,8 @@ impl Isolator {
             IsolationBackend::Docker => {
                 if Self::is_docker_available().await {
                     self.execute_in_docker(command_str).await?
+                } else if Self::is_bwrap_available() {
+                    self.execute_in_bwrap(command_str).await?
                 } else if Self::is_seatbelt_available() {
                     self.execute_in_seatbelt(command_str).await?
                 } else if Self::is_unshare_available() {
@@ -119,6 +137,17 @@ impl Isolator {
             IsolationBackend::SeatbeltOrNamespaces => {
                 if Self::is_seatbelt_available() {
                     self.execute_in_seatbelt(command_str).await?
+                } else if Self::is_bwrap_available() {
+                    self.execute_in_bwrap(command_str).await?
+                } else if Self::is_unshare_available() {
+                    self.execute_in_unshare(command_str).await?
+                } else {
+                    self.execute_in_process_sandbox(command_str).await?
+                }
+            }
+            IsolationBackend::Bubblewrap => {
+                if Self::is_bwrap_available() {
+                    self.execute_in_bwrap(command_str).await?
                 } else if Self::is_unshare_available() {
                     self.execute_in_unshare(command_str).await?
                 } else {
@@ -126,7 +155,9 @@ impl Isolator {
                 }
             }
             IsolationBackend::LinuxNamespaces => {
-                if Self::is_unshare_available() {
+                if Self::is_bwrap_available() {
+                    self.execute_in_bwrap(command_str).await?
+                } else if Self::is_unshare_available() {
                     self.execute_in_unshare(command_str).await?
                 } else {
                     self.execute_in_process_sandbox(command_str).await?
@@ -274,6 +305,90 @@ impl Isolator {
             Ok(Ok(output)) => {
                 let exit_code = output.status.code().unwrap_or(-1);
                 Ok((exit_code, output.stdout, output.stderr, "linux_namespaces"))
+            }
+            Ok(Err(e)) => Err(IsolationError::IoError(e)),
+            Err(_) => Err(IsolationError::Timeout(self.config.timeout_duration.as_millis() as u64)),
+        }
+    }
+
+    /// Linux unprivileged container / Bubblewrap (bwrap) isolation driver
+    /// Enforces strict mount namespaces, read-only system binds, tmpfs /tmp, and isolated workspace
+    async fn execute_in_bwrap(
+        &self,
+        command_str: &str,
+    ) -> Result<(i32, Vec<u8>, Vec<u8>, &'static str), IsolationError> {
+        let workspace = self
+            .config
+            .workspace_dir
+            .canonicalize()
+            .unwrap_or_else(|_| self.config.workspace_dir.clone());
+
+        let bwrap_bin = if Path::new("/usr/bin/bwrap").exists() {
+            "/usr/bin/bwrap"
+        } else if Path::new("/bin/bwrap").exists() {
+            "/bin/bwrap"
+        } else {
+            "bwrap"
+        };
+
+        let mut cmd = Command::new(bwrap_bin);
+
+        // Core system mounts (read-only)
+        for ro_path in &["/usr", "/bin", "/sbin", "/lib", "/lib64", "/etc"] {
+            if Path::new(ro_path).exists() {
+                cmd.arg("--ro-bind").arg(ro_path).arg(ro_path);
+            }
+        }
+
+        // Essential virtual filesystems
+        if Path::new("/proc").exists() {
+            cmd.arg("--proc").arg("/proc");
+        }
+        if Path::new("/dev").exists() {
+            cmd.arg("--dev").arg("/dev");
+        }
+
+        // Ephemeral isolated tmpfs
+        cmd.arg("--tmpfs").arg("/tmp");
+
+        // Writable workspace bind
+        cmd.arg("--bind")
+            .arg(&workspace)
+            .arg(&workspace);
+
+        // Namespace isolation: new user, pid, ipc, uts namespaces
+        cmd.arg("--unshare-user")
+            .arg("--unshare-pid")
+            .arg("--unshare-ipc")
+            .arg("--unshare-uts");
+
+        if !self.config.allow_network {
+            cmd.arg("--unshare-net");
+        }
+
+        // Disallow acquiring new privileges
+        cmd.arg("--die-with-parent")
+            .arg("--new-session");
+
+        cmd.arg("--chdir")
+            .arg(&workspace)
+            .arg("--")
+            .arg("sh")
+            .arg("-c")
+            .arg(command_str)
+            .env_clear()
+            .env("PATH", "/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin")
+            .env("TMPDIR", "/tmp")
+            .env("LC_ALL", "C")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let execution = timeout(self.config.timeout_duration, cmd.output()).await;
+
+        match execution {
+            Ok(Ok(output)) => {
+                let exit_code = output.status.code().unwrap_or(-1);
+                Ok((exit_code, output.stdout, output.stderr, "linux_bubblewrap"))
             }
             Ok(Err(e)) => Err(IsolationError::IoError(e)),
             Err(_) => Err(IsolationError::Timeout(self.config.timeout_duration.as_millis() as u64)),
