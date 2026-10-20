@@ -52,12 +52,17 @@ async fn test_kernel_seatbelt_blocks_directory_escape() {
 
     assert!(result.is_ok());
     let res = result.unwrap();
-    // Non-zero exit code due to kernel EPERM / Operation not permitted
+    // Non-zero exit code due to kernel EPERM / SIGABRT / Operation not permitted
     assert_ne!(res.exit_code, 0);
     let stderr_str = String::from_utf8_lossy(&res.stderr);
+    // On modern macOS (Sonoma/Sequoia), kernel kills the sandbox-exec process immediately
+    // with SIGABRT (exit code -6 or 134), while on older versions touch exits with stderr message.
+    let is_kernel_aborted = res.exit_code == -6 || res.exit_code == 134 || res.exit_code == -1;
+    let has_permission_error = stderr_str.contains("Operation not permitted") || stderr_str.contains("Permission denied");
     assert!(
-        stderr_str.contains("Operation not permitted") || stderr_str.contains("Permission denied"),
-        "Expected kernel rejection, got: {}",
+        is_kernel_aborted || has_permission_error,
+        "Expected kernel rejection or SIGABRT, got exit_code: {}, stderr: {}",
+        res.exit_code,
         stderr_str
     );
 }
