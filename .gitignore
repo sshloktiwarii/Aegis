@@ -7,3 +7,10 @@ Cargo.lock
 .env.*
 node_modules/
 dist/
+
+# System & temporary files
+*.log
+*.tmp
+__pycache__/
+*.pyc
+.env.local
